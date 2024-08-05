@@ -1,3 +1,4 @@
-![col](colony_bact.png?raw=true){width=3 height=3}
+![col](colony_bact.png?raw=true)
+[<img src="colony_bact.png" width="250"/>](colony_bact.png)
 
 https://micolab-usf.github.io/phaeosphere_AntarcticEdition/Phaeosphere_Analysis.html
