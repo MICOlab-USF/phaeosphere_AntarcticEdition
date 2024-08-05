@@ -1,0 +1,151 @@
+`conda activate qiime2-2020.6`
+
+    qiime tools import --type 'SampleData[PairedEndSequencesWithQuality]' \
+    --input-path ./ptownAntarcticaMiseq \
+    --input-format CasavaOneEightSingleLanePerSampleDirFmt \
+    --output-path ptownAntarcticaMiseq_demux-paired-end.qza
+
+
+    qiime demux summarize \
+    --i-data ptownAntarcticaMiseq_demux-paired-end.qza \
+    --o-visualization ptownAntarcticaMiseq_demux-paired-end.qzv
+
+
+    qiime dada2 denoise-paired \
+    --i-demultiplexed-seqs ptownAntarcticaMiseq_demux-paired-end.qza \
+    --output-dir ./dd2_ptownAntarcticaMiseq \
+    --o-representative-sequences ptownAntarcticaMiseq_16S_rep-seqs \
+    --p-trim-left-f 10 \
+    --p-trim-left-r 10 \
+    --p-trunc-len-f 295 \
+    --p-trunc-len-r 250 \
+    --p-n-threads 7
+
+#Rnd2
+
+    qiime dada2 denoise-paired \
+    --i-demultiplexed-seqs ptownAntarcticaMiseqRnd2_demux-paired-end.qza \
+    --output-dir ./dd2_ptownAntarcticaMiseqRnd2 \
+    --o-representative-sequences ptownAntarcticaMiseqRnd2_16S_rep-seqs \
+    --p-trim-left-f 15 \
+    --p-trim-left-r 10 \
+    --p-trunc-len-f 295 \
+    --p-trunc-len-r 260 \
+    --p-n-threads 7
+
+    qiime feature-table summarize \
+    --i-table ./dd2_ptownAntarcticaMiseq/table.qza \
+    --o-visualization ./dd2_ptownAntarcticaMiseq/table.qzv \
+    --m-sample-metadata-file ./samplemap.txt
+
+    qiime feature-table summarize \
+    --i-table ./dd2_ptownAntarcticaMiseqRnd2/table.qza \
+    --o-visualization ./dd2_ptownAntarcticaMiseqRnd2/table.qzv \
+    --m-sample-metadata-file ./sampledataRnd2.txt
+
+
+# Merge Rnd 1 and Rnd 2
+
+##Feature-Table
+qiime feature-table merge --i-tables dd2_ptownAntarcticaMiseq.qza --i-tables dd2_ptownAntarcticaMiseqRnd2.qza --o-merged-table dd2_ptownAntarcticaMiseqMERGED.qza
+
+##Representative Sequences
+qiime feature-table merge-seqs --i-data ptownAntarcticaMiseq_16S_rep-seqs.qza --i-data ptownAntarcticaMiseqRnd2_16S_rep-seqs.qza --o-merged-data ptownAntarcticaMiseqMERGED_16S_rep-seqs.qza
+
+
+REMAKE CLASSIFIER WITH THE RIGHT PRIMERS!!!
+
+    Silva 138 99% OTUs from 515F/806R region
+
+        qiime feature-classifier classify-sklearn \
+        --i-classifier silva-138-99-515-806-nb-classifier.qza \
+        --i-reads ptownAntarcticaMiseq_16S_rep-seqs.qza \
+        --o-classification ptownAntarcticaMiseq_taxonomy.qza
+
+        qiime metadata tabulate \
+        --m-input-file ptownAntarcticaMiseq_taxonomy.qza \
+        --o-visualization ptownAntarcticaMiseq_taxonomy.qzv
+
+        Get Fasta of ASVs:
+
+            qiime tools export \
+            --input-path rep-seqs99.qza \
+            --output-path rep_seqs99.fasta
+
+##Cluster at 99%
+
+            qiime vsearch cluster-features-de-novo --i-sequences ptownAntarcticaMiseq_16S_rep-seqs.qza --i-table dd2_ptownAntarcticaMiseq/table.qza --p-perc-identity .99 --p-threads 7 --o-clustered-table table99.qza --o-clustered-sequences rep-seqs99.qza
+
+qiime vsearch cluster-features-de-novo --i-sequences ptownAntarcticaMiseqMERGED_16S_rep-seqs.qza --i-table dd2_ptownAntarcticaMiseqMERGED.qza --p-perc-identity .99 --p-threads 7 --o-clustered-table MERGEDtable99.qza --o-clustered-sequences MERGEDrep-seqs99.qza
+
+qiime feature-classifier classify-sklearn \
+--i-classifier silva-138-99-515-806-nb-classifier.qza \
+--i-reads MERGEDrep-seqs99.qza \
+--o-classification ptownAntarcticaMiseqMERGED_taxonomy.qza      
+
+qiime metadata tabulate \
+--m-input-file ptownAntarcticaMiseqMERGED_taxonomy.qza \
+--o-visualization ptownAntarcticaMiseqMERGED_taxonomy.qzv  
+
+
+
+# PhytoREF
+
+qiime tools import \
+  --type 'FeatureData[Sequence]' \
+  --input-path PhytoRef_cleaned.fasta \
+  --output-path PhytoRef.qza
+
+  qiime tools import \
+    --type 'FeatureData[Taxonomy]' \
+    --input-format HeaderlessTSVTaxonomyFormat \
+    --input-path phytoRef_tax_final.txt \
+    --output-path PhytoRef_taxonomy.qza
+
+qiime feature-classifier extract-reads \
+  --i-sequences PhytoRef.qza \
+  --p-f-primer CCTACGGGNGGCWGCAG \
+  --p-r-primer GACTACHVGGGTATCTAATCC \
+  --p-min-length 200 \
+  --p-max-length 600 \
+  --o-reads PhytoRef_rep_seqs.qza
+
+  qiime feature-classifier fit-classifier-naive-bayes \
+--i-reference-reads PhytoRef_rep_seqs.qza \
+--i-reference-taxonomy PhytoRef_taxonomy.qza \
+--o-classifier PhytoRef_classifier.qza
+
+qiime feature-classifier classify-sklearn \
+--i-classifier PhytoRef_classifier.qza  \
+--i-reads MERGEDrep-seqs99.qza \
+--o-classification PhytoRE_MERGED_taxonomy.qza
+
+qiime metadata tabulate \
+--m-input-file PhytoRE_MERGED_taxonomy.qza \
+--o-visualization PhytoREF_MERGED_taxonomy.qzv
+
+
+
+RETRAIN SILVA Classifier and reclassify
+
+qiime feature-classifier extract-reads \
+  --i-sequences silva-138-99-seqs.qza \
+  --p-f-primer CCTACGGGNGGCWGCAG \
+  --p-r-primer GACTACHVGGGTATCTAATCC \
+  --p-min-length 200 \
+  --p-max-length 600 \
+  --o-reads silva-138-99-seqs-primered.qza
+
+  qiime feature-classifier fit-classifier-naive-bayes \
+--i-reference-reads silva-138-99-seqs-primered.qza \
+--i-reference-taxonomy silva-138-99-tax.qza \
+--o-classifier silva-138-99-seqs-primered_classifier.qza
+
+qiime feature-classifier classify-sklearn \
+--i-classifier silva-138-99-seqs-primered_classifier.qza \
+--i-reads MERGEDrep-seqs99.qza \
+--o-classification silva_primered_MERGED_taxonomy.qza
+
+qiime metadata tabulate \
+--m-input-file silva_primered_MERGED_taxonomy.qza \
+--o-visualization silva_primered_MERGED_taxonomy.qzv

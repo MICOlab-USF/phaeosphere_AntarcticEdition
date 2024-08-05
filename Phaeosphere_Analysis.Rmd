@@ -1,0 +1,1355 @@
+---
+title: "Phaeosphere Analysis"
+author: "Maggi Brisbin"
+date: "5/16/2024"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 6
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup 
+
+## import packages and functions, define colors
+```{r, message = FALSE}
+library(qiime2R)
+library(CoDaSeq)
+library(phyloseq)
+library(ggplot2)
+library(tidyr)
+library("dplyr")
+library("gridExtra")
+#library(RCircos)
+#library(circlize)
+library(viridis)
+#library(UpSetR)
+#library(knitr)
+library(tidyr)
+library(magrittr)
+library(vegan)
+library(stringr)
+library(patchwork)
+
+`%ni%` = Negate(`%in%`)
+
+source("~/Desktop/PhaeoPhycosphere/functions/legendplot.R")
+
+colors=c('#e9e9e9','#C14450','#f0b08f','#c2aba6','#60555f','#3c6481','#9fd6e6','#256F64','#63a375')
+
+red<- c("#EB8B8E","#FBD5E2","#E7B6AF","#AC6873", "#D82354")
+orange <- c("#FAAA6D","#FECF92")
+yellow <- c("#FFC317","#F7F4B7", "#CC9C3C")
+green <- c("#16866F","#1E3F1C","#99A339","#516A65","#8BC89F")
+blue <- c("#005694","#B7E1DD","#66879E","#1BAAE2","#5FC8D8")
+purple <- c("#E7D7CE","#A699A9","#434582","#81347D", "#B5218E")
+
+colors30 <- c(blue, purple, red, yellow, orange, green, "black")
+```
+
+Import Additional functions:
+```{r, message=FALSE}
+scripts <- c("graphical_methods.R",
+             "tree_methods.R",
+             "plot_merged_trees.R",
+             "specificity_methods.R",
+             "ternary_plot.R",
+             "richness.R",
+             "edgePCA.R",
+             "copy_number_correction.R",
+             "import_frogs.R",
+             "prevalence.R",
+             "compute_niche.R")
+urls <- paste0("https://raw.githubusercontent.com/mahendra-mariadassou/phyloseq-extended/master/R/", scripts)
+
+for (url in urls) {
+  source(url)
+}
+```
+
+## import data
+
+**MERGED run analysis**
+all 16S data from two runs (includes Antarctica single colonies (original and after 1 yr) and Antarctica environmental samples)
+
+Import and format feature table (ASV counts in each sample) and meta date (sample names, )
+```{r warning= FALSE}
+ps<-qza_to_phyloseq(features="MERGEDtable99.qza")
+
+meta<- read.csv("MERGEDsampleMetaData.txt", sep = "\t", header = TRUE)
+row.names(meta)<- meta$SampleID
+
+meta$Year <- as.character(meta$Year)
+meta$Station_Year <- paste(meta$Station, meta$Year)
+
+meta<- meta %>% separate(Name, sep="-", into = c("type", "number
+                                                "), remove = FALSE)
+
+META <- sample_data(meta)
+```
+
+Import and format SILVA taxonomy: 
+
+SILVA 138-99 taxonomy trimmed to match the primers used on samples
+```{r}
+#taxonomy <- read.csv("MERGED_taxonomy.csv", stringsAsFactors = FALSE)
+taxonomy <- read.csv("silva_primered_MERGED_taxonomy.csv", stringsAsFactors = FALSE)
+
+names(taxonomy) <- c("row", "tax", "Confidence") #change the headers (column names)
+row.names(taxonomy) <-taxonomy[[1]] #move the feature ID column to become the row names
+taxonomy <- taxonomy[,(-1)] #delete the feature ID  column 
+taxonomy <-  separate(taxonomy, tax, c("Domain","Phylum", "Class", "Order", "Family", "Genus", "Species", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14"), sep = ";", fill = "right")
+taxonomy <- taxonomy[,c(1:7)]
+
+taxonomy$D0 <- with(taxonomy, ifelse(Order == " o__Chloroplast", "Chloroplast", "Bacteria"))
+
+col_order<- c("D0", "Domain","Phylum", "Class", "Order", "Family", "Genus", "Species" )
+taxonomy<- taxonomy[, col_order]
+
+taxmat <- as.matrix(taxonomy)
+TAX = tax_table(taxmat)
+```
+
+Import and format PhytoREF taxonomy:
+
+PhytoREF trained with same primers
+```{r warning=FALSE}
+phytoR <- read.table("PhytoRef_tax_str.txt", header = FALSE)
+
+library(splitstackshape)
+phytoR_split<- cSplit(phytoR, "V1", "|")
+
+phytoR_split$taxa <- paste(phytoR_split$V1_03, phytoR_split$V1_04, phytoR_split$V1_05, phytoR_split$V1_06 , phytoR_split$V1_07, phytoR_split$V1_08, phytoR_split$V1_09, phytoR_split$V1_10, phytoR_split$V1_11, phytoR_split$V1_12, sep = "; ")
+
+phytoR_split$taxonomy <- paste(phytoR_split$taxa, phytoR_split$V2, sep = " ")
+
+phytoR <- phytoR_split  %>%  dplyr::select(V1_01, taxonomy)
+
+write.table(phytoR, "phytoRef_tax_final.txt", quote = FALSE, sep = "\t", col.names = FALSE, row.names = FALSE)
+```
+
+
+```{r}
+PRtaxonomy <- read.csv("phytoRef_MERGED_taxonomy.csv", stringsAsFactors = FALSE)
+names(PRtaxonomy) <- c("row", "tax", "Confidence") #change the headers (column names)
+row.names(PRtaxonomy) <-PRtaxonomy[[1]] #move the feature ID column to become the row names
+PRtaxonomy <- PRtaxonomy[,(-1)] #delete the feature ID  column 
+PRtaxonomy <-  separate(PRtaxonomy, tax, c("Domain","Phylum", "Class", "Order", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"), sep = ";", fill = "right")
+
+#taxonomy <- taxonomy[,c(1:7)]
+#col_order<- c("D0", "Domain","Phylum", "Class", "Order", "Family", "Genus", "Species" )
+#taxonomy<- taxonomy[, col_order]
+
+PRtaxmat <- as.matrix(PRtaxonomy)
+PRTAX = tax_table(PRtaxmat)
+```
+
+
+
+Make phyloseq object:
+```{r}
+ps = merge_phyloseq(ps, TAX, META) 
+
+```
+
+# Chloroplast sequences
+
+Plot relative abundance as stacked bar plot (all samples including chloroplast sequences) to visualize the relative abundance of chloroplast and bacterial sequences in each sample:  
+
+```{r, fig.width=10}
+ps<- subset_taxa(ps, D0 %in% c("Bacteria", "Chloroplast") )
+ps <- subset_samples(ps, Dataset %in% c("PantCol", "Antarctica"))
+psra<- transform_sample_counts(ps, function(OTU) 100* OTU/sum(OTU))
+glomD1<- tax_glom(psra, 'D0')
+
+
+taxabarplot<-plot_bar(glomD1, x= "Name", fill = "D0") +  scale_y_continuous(expand = c(0, 0)) + ggtitle("")  + theme(legend.title=element_blank()) + geom_bar(aes(fill=D0), stat="identity", position="stack", width =0.9) +theme_classic() + theme(text = element_text(size=14))+theme(axis.text.x = element_text(angle = 90)) + xlab("Sample") + ylab("Relative Abundance (%)") + theme(text = element_text(size=14)) + scale_fill_manual(values=c("lightgrey", "#7BB03B"), name = "") + xlab("") + facet_grid(~Dataset + Year, scales = "free")
+
+taxabarplot
+```
+**Supplemental Figure 2**
+ggsave("chloroplast_barplot.pdf", width = 10, height = 5)
+
+Get summary statistics about the amount of chloroplast sequences in single-colony samples (these are all Phaeocystis/host and not data that are particularly useful)"
+```{r}
+pantcol_chloro_stats <- subset_samples(glomD1, Dataset == "PantCol")  
+chloro_stat_melt <- psmelt(pantcol_chloro_stats) %>% filter(D0 == "Chloroplast")
+
+min(chloro_stat_melt$Abundance)
+mean(chloro_stat_melt$Abundance)
+max(chloro_stat_melt$Abundance)
+
+```
+
+Create a phyloseq object with only chloroplast sequences and switch out taxonomy from SILVA to PhytoRef:
+```{r}
+ps_chloro <- subset_taxa(ps, Order == " o__Chloroplast" )
+
+ps_chlorotax <- merge_phyloseq(ps_chloro, PRTAX)
+```
+
+
+
+# Bacterial Sequences
+
+Create a phyloseq object with only bacterial sequences:
+
+```{r}
+ps_nochloro <- subset_taxa(ps, Order != " o__Chloroplast" & Domain != "Unassigned")
+```
+
+
+## Rarefaction Curves
+```{r warning=FALSE, message=FALSE, max.print=1}
+ggrare(ps_nochloro, step = 1000, color = "Dataset", label = "Name", se = FALSE)
+```
+
+Rarefaction for Antarctica colonies: 
+```{r warning=FALSE, message=FALSE, max.print=1}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30")
+
+colony_bacteria_rare<- ggrare(PSColony, step = 1000, color = "Station_Year", se = FALSE) + theme_test() + scale_color_manual(values= c("#005694","#FFC317", "#5FC8D8" ))
+colony_bacteria_rare
+```
+
+```{r warning=FALSE, message=FALSE, max.print=1}
+ ant_enviro<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") & Year == "2021")
+
+field_bacteria_rare<-ggrare( ant_enviro, step = 1000, color = "type", se = FALSE) + theme_test() + scale_color_manual(values= c("#1E3F1C","#8BC89F"))
+
+field_bacteria_rare
+```
+
+```{r}
+colony_bacteria_rare + field_bacteria_rare 
+```
+
+**Supplemental Figure 3**
+ 
+## Alpha diversity
+
+**ASV Richness**
+
+```{r}
+totalOTU <- data.frame(otu_table(ps_nochloro))
+totalOTU$rowsu <- rowSums(totalOTU)
+totalOTUnotzero <- totalOTU %>% filter(rowsu >1)
+dim(totalOTUnotzero)
+
+```
+
+```{r warning=FALSE, message=FALSE}
+plugin <- ps_nochloro %>%
+            estimate_richness(measures = "Observed") %$% Observed
+Dataset <- ps_nochloro %>% sample_data %$% Dataset
+Station <- ps_nochloro %>% sample_data %$% Station
+Replicate <- ps_nochloro %>% sample_data %$% Rep
+Month <- ps_nochloro %>% sample_data %$% Month
+Year <- ps_nochloro %>% sample_data %$% Year
+
+richness<- data.frame(plugin, Dataset, Station, Replicate, Month, Year )
+names(richness) <- c("richness", "Dataset", "Station", "Replicate", "Month", "Year")
+
+
+richness %>%group_by(Dataset, Year) %>% summarize(mean = mean(richness), min = min(richness), max = max(richness))
+```
+
+```{r}
+
+RichPlot<- richness %>%  filter(Dataset == "PantCol" ) %>% ggplot( aes(x=Station, y=richness, fill = Year))+ facet_grid(~ Year + Station, scales = "free") +geom_boxplot() + theme_bw() + scale_fill_manual(values = c( "#75D1B7", "#256F64", "black", "grey")) + theme(text = element_text(size=14)) +ylab("Observed Richness") +ggtitle("")+ theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank()) +xlab("")#+ limy(0, 90)
+
+RichPlot
+```
+
+ggsave("richness_antarctica_colonies.pdf", width = 5, height =3)
+
+**Figure 2A**
+
+Richness summary stats for manuescript: 
+- need total unique ASVs for each sample type plus the mean and range per samples
+
+
+```{r}
+PSColony_field<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" &Year == 2021)
+
+PSColony_field = filter_taxa(PSColony_field, function(x) sum(x) > 1, TRUE)
+
+PSColony_field
+```
+-> 241 unique ASVs across all field-collected colony microbiomes
+
+```{r, warning=FALSE}
+plugin <- PSColony_field %>%
+            estimate_richness(measures = "Observed") %$% Observed
+Dataset <- PSColony_field %>% sample_data %$% Dataset
+Station <- PSColony_field %>% sample_data %$% Station
+Replicate <- PSColony_field %>% sample_data %$% Rep
+Month <- PSColony_field %>% sample_data %$% Month
+Year <- PSColony_field %>% sample_data %$% Year
+
+richness<- data.frame(plugin, Dataset, Station, Replicate, Month, Year )
+names(richness) <- c("richness", "Dataset", "Station", "Replicate", "Month", "Year")
+
+min(richness$richness)
+mean(richness$richness)
+max(richness$richness)
+```
+^ min, mean, max per field-collected colony
+
+Cultured-colonies:
+```{r}
+PSColony_culture<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" & Year == 2023)
+
+PSColony_culture = filter_taxa(PSColony_culture, function(x) sum(x) > 1, TRUE)
+
+PSColony_culture
+```
+-> 74 ASVs total across all cultured colonies 
+
+```{r, warning = FALSE}
+plugin <- PSColony_culture %>%
+            estimate_richness(measures = "Observed") %$% Observed
+Dataset <- PSColony_culture %>% sample_data %$% Dataset
+Station <- PSColony_culture %>% sample_data %$% Station
+Replicate <- PSColony_culture %>% sample_data %$% Rep
+Month <- PSColony_culture %>% sample_data %$% Month
+Year <- PSColony_culture %>% sample_data %$% Year
+
+richness<- data.frame(plugin, Dataset, Station, Replicate, Month, Year )
+names(richness) <- c("richness", "Dataset", "Station", "Replicate", "Month", "Year")
+
+min(richness$richness)
+mean(richness$richness)
+max(richness$richness)
+```
+^ min, mean, and max ASVs counts in cultured-colony microbiomes
+
+## Beta Diversity
+
+### Bar Plots
+
+First look Barplot (at Order level): 
+```{r}
+ps_nochloro_RA<- transform_sample_counts(ps_nochloro, function(OTU) 100* OTU/sum(OTU))
+
+ps_nochloro_RA_glomO<- tax_glom(ps_nochloro_RA, 'Order')
+
+taxabarplot<-plot_bar(ps_nochloro_RA_glomO, x= "Name", fill = "Order") +  scale_y_continuous(expand = c(0, 0)) + ggtitle("")  + theme(legend.title=element_blank()) + geom_bar(aes(fill=Order), stat="identity", position="stack", width =0.9) +theme_classic() + theme(text = element_text(size=14))+theme(axis.text.x = element_text(angle = 90)) + xlab("Sample") + ylab("Relative Abundance (%)") + theme(text = element_text(size=14)) + scale_fill_manual(values= rep( colors, 30))+ xlab("") + facet_grid(~Dataset, scales= "free_x")
+
+taxabarplot+ theme(legend.position="none")
+```
+
+
+**Colonies barplot **
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30")
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA_glomO<- tax_glom(ps_colony_RA, 'Order')
+
+ps_colony_RA_glomO_F = filter_taxa(ps_colony_RA_glomO , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_glomO_F) 
+mergemelt$Order<-str_sub(mergemelt$Order, 5, str_length(mergemelt$Order))
+mergemelt$Order[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+spatial_plot <- ggplot(data=mergemelt, aes(x=Name, y=Abundance, fill=Order)) + facet_grid(~ Year + Station, scales = "free")
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( rep(colors30, 2))) + guides(fill=guide_legend(nrow=5)) + theme(legend.title =element_blank())
+```
+ggsave("antarctica_colonies.pdf", width = 5, height =5)
+
+**Figure 2B**
+
+### Ordinations
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol")  &  Name != "A30")
+
+OTU4clr<- data.frame(t(data.frame(otu_table(PSColony))))
+row.names(OTU4clr) <- str_remove(row.names(OTU4clr), "X")
+row.names(OTU4clr) <- gsub("\\.", "-", row.names(OTU4clr))
+OTUs.clr <- codaSeq.clr(OTU4clr + 0.5, samples.by.row=TRUE)
+OTU2 <- otu_table(as.matrix(OTUs.clr), taxa_are_rows = FALSE)
+
+psCLR <- phyloseq(OTU2,TAX,META)
+
+ordu = ordinate(psCLR, "PCoA", "euclidean")
+
+p<-plot_ordination(psCLR, ordu)+theme_bw()  +  theme(text = element_text(size=14)) +  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +  geom_vline(xintercept = 0, linetype = "dashed", color = "lightgrey") + theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank()) +geom_point(aes(fill=Year, shape = Station), size =3)  + scale_shape_manual(values= c(21,24)) +scale_fill_manual(values=colors[-1]) +guides(fill = guide_legend(override.aes=list(shape=21)))
+p
+
+```
+
+ggsave("ant_col_PCoA.pdf", width = 5, height =3)
+
+**Supplemental Figure 4**
+
+PERMANOVA 
+by year (field-collected v. cultured colony microbiomes)
+```{r}
+OTUs<- data.frame(otu_table(psCLR))
+meta4year <- meta[row.names(meta) %in% row.names(OTUs),]
+
+
+meta4year$Sample.Type <- factor(meta4year$Year , levels = c("2021", "2023"))
+
+set.seed(1)
+adonis2(vegdist(OTUs, method = "euclidean") ~ Sample.Type, data = meta4year)
+```
+**Field-collected and cultured colony microbiomes are significantly different**
+
+PCoA of just field-collected colonies to check for differences between stations: 
+
+```{r}
+AntColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol")  &  Name != "A30" & Year == "2021")
+OTU4clr<- data.frame(t(data.frame(otu_table(AntColony))))
+row.names(OTU4clr) <- str_remove(row.names(OTU4clr), "X")
+row.names(OTU4clr) <- gsub("\\.", "-", row.names(OTU4clr))
+OTUs.clr <- codaSeq.clr(OTU4clr + 0.5, samples.by.row=TRUE)
+OTU2 <- otu_table(as.matrix(OTUs.clr), taxa_are_rows = FALSE)
+
+psCLR <- phyloseq(OTU2,TAX,META)
+
+ordu = ordinate(psCLR, "PCoA", "euclidean")
+
+p<-plot_ordination(psCLR, ordu)+theme_bw()  +  theme(text = element_text(size=14)) +  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +  geom_vline(xintercept = 0, linetype = "dashed", color = "lightgrey") + theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank()) +geom_point(aes(fill=Station, shape = Dataset), size =3)  + scale_shape_manual(values= c(21,21)) +scale_fill_manual(values=colors[-1]) +guides(fill = guide_legend(override.aes=list(shape=21)))
+p
+
+```
+
+PERMANOVA by station : 
+```{r}
+OTUs<- data.frame(otu_table(psCLR))
+meta4stat <- meta[row.names(meta) %in% row.names(OTUs),]
+
+
+meta4stat$Sample.Type <- factor(meta4stat$Station , levels = c("400", "600"))
+
+set.seed(1)
+adonis2(vegdist(OTUs, method = "euclidean") ~ Sample.Type, data = meta4stat)
+```
+Stations are not significantly different
+
+### Heat plots of ASVs by order
+
+Prepare data frame:
+```{r}
+AntColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") & Region == "Antarctica" &  Name != "A30")
+nchF = filter_taxa(AntColony, function(x) sum(x) > 1, TRUE)
+nchfffra<- transform_sample_counts(nchF, function(OTU) 100* OTU/sum(OTU))
+a_ra <- psmelt(nchfffra)
+```
+
+#### Alteromonadales
+
+```{r}
+altero<- subset_taxa(nchfffra, Order == " o__Alteromonadales")
+
+sw_ra <- psmelt(altero)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+**Supplemental Figure 5**
+
+
+#### Oceanospirillales
+```{r}
+oceano<- subset_taxa(nchfffra, Order == " o__Oceanospirillales")
+
+sw_ra <- psmelt(oceano)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station, Year)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Year+Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$OTU) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+
+
+
+```{r}
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Year+Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+ggsave("oceano_heatplot.pdf", width = 7, height = 5)
+
+**Supplemental FIgure 8**
+
+#### Rhodobacterales 
+
+```{r}
+rhodo<- subset_taxa(nchfffra, Order == " o__Rhodobacterales")
+
+sw_ra <- psmelt(rhodo)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station, Year)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Year+Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+
+ggsave("Rhodo_heatplot.pdf", width = 7, height = 5)
+**Supplemental Figure 7**
+
+```{r}
+sulfito <- sw_long %>% filter(Year == "2023") %>% filter(OTU == "8ee2658ac7dd8e0f20d396c3d3e1a539")
+
+min(sulfito$Abundance)
+mean(sulfito$Abundance)
+max(sulfito$Abundance)
+
+```
+^ summary stats for sulfitobacter rel abunandance in cultured-colony microbiomes
+
+#### Cellvibrionales
+```{r}
+cellv<- subset_taxa(nchfffra, Order == " o__Cellvibrionales")
+
+sw_ra <- psmelt(cellv)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station, Year)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Year+Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+
+```{r}
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Year+Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$OTU) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c()
+
+
+heat_plot
+```
+
+
+bc13a8f6afa703399c40d5879cc68221 = Sar92 clade ASV  <- get summary stats  
+
+
+```{r}
+sw_long %>%  filter(OTU == "bc13a8f6afa703399c40d5879cc68221") %>%  summarize(mean = mean(Abundance), min = min(Abundance), max = max(Abundance))
+```
+
+
+#### Caulobacterialaes
+```{r}
+caulo<- subset_taxa(nchfffra, Order == " o__Caulobacterales")
+
+sw_ra <- psmelt(caulo)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station, Year)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c() +facet_grid(~Year+Station, scales = "free_x", space = "free")
+
+
+heat_plot
+```
+
+```{r}
+algimonas <- sw_long %>% filter(Year =="2023") %>% filter(OTU %in% c("e7f391400f0a3e23b1c732d60e33016c", "715318dadbd602bb7863947527c67e3e")) %>% group_by(Name) %>% summarize(total = sum(Abundance))
+
+min(algimonas$total)
+mean(algimonas$total)
+max(algimonas$total)
+sd(algimonas$total)
+
+```
+^ summary stats for algimonas in cultured-colony microbiomes
+
+#### Sphingomonadales
+
+```{r}
+sphingo<- subset_taxa(nchfffra, Order == " o__Sphingomonadales")
+
+sw_ra <- psmelt(sphingo)
+
+sw_long<- sw_ra %>% dplyr::select(OTU, Name, Order, Family, Genus, Abundance, Station, Year)
+
+sw_long<- sw_long[rev(order(sw_long$Genus)),]
+
+factord<- unique(sw_long$OTU)
+
+sw_long$OTU <- factor(sw_long$OTU, levels = factord)
+
+sw_long$Genus<-str_sub(sw_long$Genus, 5, str_length(sw_long$Genus))
+
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$Genus) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c() +facet_grid(~Year+Station, scales = "free_x", space = "free")
+
+
+heat_plot
+```
+
+```{r}
+heat_plot <- ggplot(sw_long[sw_long$Abundance >0,] ,aes(Name, OTU)) + theme_classic()+
+    geom_tile(aes( fill=Abundance)) +
+    theme( axis.text.x=element_text(angle=90,hjust=1,vjust=0),
+          panel.background = element_blank()) +
+    ylab("") +
+    xlab("")  + 
+    scale_size(name = "Relative\nabundance")+ facet_grid(~Station, scales = "free_x", space = "free") + scale_y_discrete(breaks = sw_long$OTU, labels = sw_long$OTU) + theme(panel.spacing.x=unit(0.05, "lines")) +scale_fill_viridis_c() +facet_grid(~Year+Station, scales = "free_x", space = "free")
+
+
+heat_plot
+```
+Blast results for the the Sphingomonas ASV abundant in field-collected colony microbiomes: 
+
+>f1ea98d49baf3dd5dd4b2456017e5d48
+GCAGCAGTGGGGAATATTGGACAATGGGCGAAAGCCTGATCCAGCAATGCCGCGTGAGTGATGAAGGCCTTAGGGTTGTAAAGCTCTTTTACCAGGGATGATAATGACAGTACCTGGAGAATAAGCTCCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGGAGCTAGCGTTGTTCGGAATTACTGGGCGTAAAGCGCACGTAGGCGGCTTTTCAAGTCAGGGGTGAAATCCCGGGGCTCAACCCCGGAACTGCCCTTGAAACTGGATGGCTAGAATACTGGAGAGGTGAGTGGAATTCCGAGTGTAGAGGTGAAATTCGTAGATATTCGGAAGAACACCAGTGGCGAAGGCGACTCACTGGACAGTTATTGACGCTGAGGTGCGAAAGCGTGGGGAGCAAACAGGATTAGATAC
+
+Erythrobacter - previously found in marine sediment
+
+# Antarctica environmental mapping
+
+## Chloroplasts geoplot
+```{r}
+OTU4chloro<- (data.frame(otu_table(ps_chloro)))
+names(OTU4chloro) <- gsub("\\.", "-", names(OTU4chloro))
+
+PRtaxdf <- PRtaxonomy %>% filter(row.names(PRtaxonomy) %in% row.names(OTU4chloro))
+
+PRtaxmat <- as.matrix(PRtaxdf)
+PRTAX = tax_table(PRtaxmat)
+
+OTU2 <- otu_table(as.matrix(OTU4chloro), taxa_are_rows = TRUE)
+
+ps_chlorotax  <- phyloseq(OTU2,PRTAX,META)
+
+ps_chloro_RA<- transform_sample_counts(ps_chlorotax, function(OTU) 100* OTU/sum(OTU))
+
+ps_chloro_RA_glomO<- tax_glom(ps_chloro_RA, 'Order')
+pouch_col_chloro <- subset_samples(ps_chloro_RA_glomO, Dataset %in% c("Antarctica") & Year == "2021")
+nchF = filter_taxa(pouch_col_chloro, function(x) sum(x) > 1, TRUE)
+```
+
+
+```{r}
+a_ra <- psmelt(nchF)
+
+a4long<- a_ra %>%  dplyr::select(OTU, Sample, Name, Order, Class, Abundance, Station, Year)
+
+a4long<- a4long[rev(order(a4long$Order)),]
+
+factord<- unique(a4long$OTU)
+
+a4long$OTU <- factor(a4long$OTU, levels = factord)
+```
+
+
+
+```{r}
+extraction_log<- read.csv("antRNA_extractions .csv")
+
+FTextractions <- extraction_log %>% filter(SampleType =="FT")
+CTDextractions <- extraction_log %>% filter(SampleType =="CTD")
+
+ftlog <- read.csv("ftlog.csv")
+ftlog$Name<- paste0("FT-", ftlog$Sample)
+ctdlog <- read.csv("ctdlog.csv") %>% filter(Depth == 0)
+ctdlog$Name <- paste0("CTD-", ctdlog$Sample_ID)
+
+ftlog_notprocessed<- ftlog %>% select(Name, start_lat_degdec, start_long_degdec) %>% filter(Name %ni% a4long$Name)
+
+names(ftlog_notprocessed)<- c("Name", "Lat", "Long")
+
+ftlog_vols <- ftlog %>% select(Name, start_lat_degdec, start_long_degdec, vol_start, vol_end) %>% filter(Name %in% a4long$Name)
+
+ftlog_vols$vol <- ftlog_vols$vol_end - ftlog_vols$vol_start
+
+min(ftlog_vols$vol)
+mean(ftlog_vols$vol)
+max(ftlog_vols$vol)
+
+ftlog<- ftlog %>% select(Name, start_lat_degdec, start_long_degdec) %>% filter(Name %in% a4long$Name)
+
+
+names(ftlog)<- c("Name", "Lat", "Long")
+
+
+ctdlog<- ctdlog %>% select(Name, Lat, Long) %>% filter(Name %in% a4long$Name)
+
+sample_locs <- rbind(ftlog, ctdlog) 
+
+a4long_locs<- left_join(a4long, sample_locs, by = "Name")
+
+wider_a4long_locs<- a4long_locs %>% select(Name, Order, Abundance, Lat, Long) %>% pivot_wider( names_from = c("Order"), values_from = c("Abundance"))
+```
+^ volumes filtered per flow-through/underway sample
+
+
+```{r}
+library(ggspatial)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(scatterpie)
+
+scatter_colors <- c("#ef3c23",  "#cfe5cc", "#fac92c" ,"darkgrey", "#215F38", "#0181BB")
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+strainlist <- unique(a4long_locs$Order)
+rna <- read.csv("ctdlog.csv")
+
+FT_scatterpie_plot<-ggplot(data = world) + geom_sf(lwd = 0) + theme_void() + geom_scatterpie(data=wider_a4long_locs %>% filter(str_detect(Name, "FT")),aes(x=Long, y=Lat, group = Name, r=0.2), cols = strainlist, color=NA, alpha=.8 ) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("")+ ylab("")+ggtitle("Underway")  + 
+  scale_fill_manual(values = scatter_colors) + 
+  coord_sf(xlim = c(-70, -65), ylim = c(-66, -62), expand = TRUE)+ theme(legend.position = "bottom") + 
+  geom_point(data = ftlog_notprocessed, aes (x= Long, y= Lat), color = "red", size = 0.1) +
+  geom_point(data = (rna %>% filter(Study == "Grid")), aes (x= Long, y= Lat), color = "black", size = 0.2) 
+```
+
+
+```{r}
+CTD_scatterpie_plot<-ggplot(data = world) + geom_sf(lwd = 0) + theme_void() + geom_scatterpie(data=wider_a4long_locs %>% filter(str_detect(Name, "CTD")),aes(x=Long, y=Lat, group = Name, r=0.5), cols = strainlist, color=NA, alpha=.8 ) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("")+ ylab("")+ggtitle("CTD/Niskin")  + scale_fill_manual(values = scatter_colors) + coord_sf(xlim = c(-73, -56), ylim = c(-68, -60), expand = TRUE) + theme(legend.position = "none") + geom_point(data = (rna %>% filter(Study == "Grid")), aes (x= Long, y= Lat), color = "black", size = 0.1)
+```
+
+```{r}
+  CTD_scatterpie_plot + FT_scatterpie_plot +plot_layout(guides = "collect") &
+  theme(legend.position='bottom')
+```
+**Figure 3 A-B**
+
+
+## Bacteria geoplot scatterpie
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") &  Name != "A30" & Year !=2023)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA_glomO<- tax_glom(ps_colony_RA, 'Order')
+
+ps_colony_RA_glomO_F = filter_taxa(ps_colony_RA_glomO , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_glomO_F) 
+mergemelt$Order<-str_sub(mergemelt$Order, 5, str_length(mergemelt$Order))
+mergemelt$Order[mergemelt$Abundance < 1] <- "z< 1% abund."
+```
+
+
+```{r warning=FALSE, message=FALSE}
+bact_a4long_locs<- left_join(mergemelt, sample_locs, by = "Name")
+
+bact_wider_a4long_locs<- bact_a4long_locs %>% select(Name, Order, Abundance, Lat, Long) %>% group_by(Name, Order, Lat, Long) %>% summarize(Abundance = sum(Abundance)) %>% ungroup() %>%  pivot_wider( names_from = c("Order"), values_from = c("Abundance"), values_fill = 0)
+```
+
+
+
+```{r}
+scatter_colors <- c(colors30[1:3], "#F95700", colors30[7:8],  colors30[12], colors30[15:16],  colors30[21])
+
+strainlist <- c("Flavobacteriales", "Oceanospirillales" ,"Alteromonadales"  , "SAR11_clade", "Thiomicrospirales", "Cellvibrionales"  , "Rhodobacterales"  , "SAR86_clade","Burkholderiales",  "Chitinophagales" )    
+
+bact_wider_a4long_locs<- data.frame(bact_wider_a4long_locs)
+
+FT_scatterpie_plot<-ggplot(data = world) + geom_sf(lwd = 0) + theme_void() + geom_scatterpie(data=bact_wider_a4long_locs %>% filter(str_detect(Name, "FT")),aes(x=Long, y=Lat, group = Name, r=0.2), cols = strainlist, color=NA, alpha=.8 ) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("")+ ylab("")+ggtitle("Flow-through")  + 
+  scale_fill_manual(values = scatter_colors) + 
+  coord_sf(xlim = c(-70, -65), ylim = c(-66, -62), expand = TRUE) + theme(legend.position = "bottom") + 
+  geom_point(data = (rna %>% filter(Study == "Grid")), aes (x= Long, y= Lat), color = "black", size = 0.2) 
+```
+
+
+```{r}
+CTD_scatterpie_plot<-ggplot(data = world) + geom_sf(lwd = 0) + theme_void() + geom_scatterpie(data=bact_wider_a4long_locs %>% filter(str_detect(Name, "CTD")),aes(x=Long, y=Lat, group = Name, r=0.5), cols = strainlist, color=NA, alpha=.8 ) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + xlab("")+ ylab("")+ggtitle("CTD/Niskin")  + scale_fill_manual(values = scatter_colors) + coord_sf(xlim = c(-73, -56), ylim = c(-68, -60), expand = TRUE) + theme(legend.position = "none") + geom_point(data = (rna %>% filter(Study == "Grid")), aes (x= Long, y= Lat), color = "black", size = 0.1)
+```
+
+```{r}
+  CTD_scatterpie_plot + FT_scatterpie_plot + plot_layout(guides = "collect") &
+  theme(legend.position='bottom')
+```
+
+**Figure 3 C-D**
+
+## Correlations
+### Alteromonadales
+
+```{r}
+PSColony4corr<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" & Year !=2023)
+
+ps_colony_RA4corr<- transform_sample_counts(PSColony4corr, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA4corr <- filter_taxa(ps_colony_RA4corr, function(x) sum(x) > 1, TRUE)
+
+
+melted_Colony4Corr <- psmelt(ps_colony_RA4corr) 
+
+colAlteromonas4orr <- melted_Colony4Corr %>% filter(Order == " o__Alteromonadales")
+
+AlteromonasASVs <- unique(colAlteromonas4orr$OTU)
+
+
+
+Ant4corr<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") &  Name != "A30" & Year !=2023)
+
+Ant4corr<- transform_sample_counts(Ant4corr, function(OTU) 100* OTU/sum(OTU))
+
+melted_Ant4corrr <- psmelt(Ant4corr) 
+
+altero_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% AlteromonasASVs)
+#pivot wider
+wider_altero<- altero_Ant4corrr %>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer_altero<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_altero) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer_altero)[2] <- "Prymnesiophyceae"
+
+```
+
+Correlation between all ALteromonadales ASVs in both colony and environmental samples to phaeocystis ASVs in environmental samples:
+```{r}
+longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, color = source)) + geom_point() +facet_wrap(~bact_ASV)
+```
+
+The most abundant colony-associated ASV:
+
+```{r}
+longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>% filter(bact_ASV =="6c1096cb4d53196f3b70850af15c7b35") %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, color = source)) + geom_point() +facet_wrap(~bact_ASV)
+```
+
+
+####Paraglaciecola 
+Sum up all paraglaciecola ASVs and plot:
+
+```{r}
+altero_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% AlteromonasASVs)
+
+
+summed_genera <- altero_Ant4corrr %>%  group_by(Name, Genus) %>% summarize(total_abund = sum(Abundance)) %>% filter( Genus == " g__Paraglaciecola")
+
+#join with Phaeo abundance
+longer_altero<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(summed_genera)
+names(longer_altero)[2] <- "Prymnesiophyceae"
+
+Paraglaciecola <-longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>%  ggplot(aes(x=Prymnesiophyceae, y=total_abund, fill = source, shape = source)) + geom_point(size = 3)  + scale_shape_manual(values = c(21, 24)) +theme_test() + ggtitle("Paraglaciecola sp.") + geom_smooth(method = "lm", se = FALSE, aes(color = source)) + scale_fill_manual(values = c("lightgrey", "black" )) + scale_color_manual(values = c("darkgrey", "black" ))
+
+
+Paraglaciecola 
+```
+
+CTD lm and significance: 
+```{r}
+data = longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD")
+
+summary(lm(formula = total_abund ~ Prymnesiophyceae, data = data ))
+```
+
+Flowthrough lm and significance: 
+
+```{r}
+data = longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT")
+
+summary(lm(formula = total_abund ~ Prymnesiophyceae, data = data ))
+```
+
+
+#### Colwellia
+Sum up Colwellia ASVs and plot:
+
+```{r}
+altero_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% AlteromonasASVs)
+
+
+summed_genera <- altero_Ant4corrr %>%  group_by(Name, Genus) %>% summarize(total_abund = sum(Abundance)) %>% filter( Genus == " g__Colwellia")
+
+#join with Phaeo abundance
+longer_altero<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(summed_genera)
+names(longer_altero)[2] <- "Prymnesiophyceae"
+
+Colwellia <- longer_altero %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>%  ggplot(aes(x=Prymnesiophyceae, y=total_abund, fill = source, shape = source)) + geom_point(size = 3)  + scale_shape_manual(values = c(21, 24)) +theme_test() + ggtitle("Colwellia sp.") + scale_fill_manual(values = c("lightgrey", "black" )) + scale_color_manual(values = c("darkgrey", "black" ))
+
+Colwellia
+```
+
+FT-10 53.369710 g__Colwellia 7.29 % (end of 600 line)
+FT-18 16.081232 g__Colwellia 13.48 % (landward end of flowthroughs on 400 line)
+FT-7 16.412716 g__Colwellia 19.24 % (landward end of flowthroughs on 600 line)
+ 
+REMEMBER - field is RNA = activity - Colwellia is more ACTIVE at lower phaeo sites?
+ 
+ 
+Visualize %Paraglaciecola/Colwellia in each colony - Plot rel abund of all alteronmonadales genera for field colonies:
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" &Year == 2021)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA <- subset_taxa(ps_colony_RA, Order == " o__Alteromonadales")
+
+ps_colony_RA_glomG<- tax_glom(ps_colony_RA, 'Genus')
+
+ps_colony_RA_glomG_F = filter_taxa(ps_colony_RA_glomG , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_glomG_F) 
+mergemelt$Genus<-str_sub(mergemelt$Genus, 5, str_length(mergemelt$Genus))
+#mergemelt$Genus[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+spatial_plot <- ggplot(data=mergemelt, aes(x=Name, y=Abundance, fill=Genus)) + facet_grid(~ Station, scales = "free")
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( "#262626", "#d0cef3","#e99eb2", "#ffc100", "#fafff1" )) + guides(fill=guide_legend(nrow=1)) + theme(legend.title =element_blank()) 
+```
+ggsave("Alteromonas_barplot.pdf", width = 7, height = 4)
+**Supplemental Figure 6**
+
+### Oceanospirillales
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" &Year == 2021)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA <- subset_taxa(ps_colony_RA, Order == " o__Oceanospirillales")
+
+ps_colony_RA_glomF<- tax_glom(ps_colony_RA, 'Family')
+
+ps_colony_RA_glomG_F = filter_taxa(ps_colony_RA_glomF , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_glomG_F) 
+mergemelt$Family<-str_sub(mergemelt$Family, 5, str_length(mergemelt$Family))
+#mergemelt$Genus[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+spatial_plot <- ggplot(data=mergemelt, aes(x=Name, y=Abundance, fill=Family)) + facet_grid(~ Station, scales = "free")
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( "#262626", "#d0cef3","#e99eb2", "#ffc100", "#fafff1" )) + guides(fill=guide_legend(nrow=1)) + theme(legend.title =element_blank()) 
+```
+ggsave("Oceano_barplot.pdf", width = 7, height = 4)
+**Supplemental Figure 9A**
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("PantCol") &  Name != "A30" &Year == 2021)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA <- subset_taxa(ps_colony_RA, Order == " o__Oceanospirillales")
+
+#ps_colony_RA_glomF<- tax_glom(ps_colony_RA, 'Family')
+
+ps_colony_RA_F = filter_taxa(ps_colony_RA , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_F) 
+
+mergemelt$Family<-str_sub(mergemelt$Family, 5, str_length(mergemelt$Family))
+#mergemelt$Genus[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+mergemelt <- mergemelt %>% filter(OTU %in% c("90fd832464c5fbc417533484304f566f", "3f64882f4221742c1cfa89d89cfe7975"))
+
+spatial_plot <- ggplot(data=mergemelt, aes(x=Name, y=Abundance, fill=OTU)) + facet_grid(~ Station, scales = "free")
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( "hotpink" ,"pink")) + guides(fill=guide_legend(nrow=1)) + theme(legend.title =element_blank()) 
+```
+
+ggsave("Oceano_barplot_ASVs.pdf", width = 7, height = 4)
+**Supplemental Figure 9B**
+
+```{r}
+
+col4corr_oceano <- melted_Colony4Corr %>% filter(Order == " o__Oceanospirillales")
+
+oceanoASVs <- unique(col4corr_oceano$OTU)
+
+
+oceano_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% oceanoASVs)
+#pivot wider
+wider_oceano<- oceano_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_oceano) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, color = source)) + geom_point() +facet_wrap(~bact_ASV)
+```
+
+mostly driven by 90fd ... and d536
+90fd832464c5fbc417533484304f566f
+d536522dff81586b788ee4acdbadb881
+
+
+The colony-associated Oceanospirillales was dominated by two ASVs
+90fd832464c5fbc417533484304f566f (uncultured) & 3f64882f4221742c1cfa89d89cfe7975 (Profundimonas sp., family: Nitrincolaceae) 
+
+Environmentally abundant = 90fd832464c5fbc417533484304f566f (uncultured, family: Nitrincolaceae) - most abundant by a long shot (~5-25% of enviro samples)  & 
+
+d536522dff81586b788ee4acdbadb881 (0-5.5ish of enviro samples) (uncultured, family: Nitrincolaceae)
+
+
+
+```{r}
+
+col4corr_oceano <- melted_Colony4Corr %>% filter(Order == " o__Oceanospirillales") %>%  filter(OTU  %in% c("90fd832464c5fbc417533484304f566f","3f64882f4221742c1cfa89d89cfe7975","d536522dff81586b788ee4acdbadb881" ) )
+
+oceanoASVs <- unique(col4corr_oceano$OTU)
+
+
+oceano_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% oceanoASVs)
+#pivot wider
+wider_oceano<- oceano_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_oceano) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, fill = source)) +facet_wrap(~bact_ASV) + geom_point(size = 3, shape = 21)  + theme_test() + ggtitle("Oceanospirillales") + geom_smooth(method = "lm", se = FALSE, aes(color = source)) + scale_fill_manual(values = c("#00A4CC", "#F95700" )) + scale_color_manual(values = c("#00A4CC", "#F95700" ))
+```
+
+ggsave("oceano_phaeo_correlations.pdf", width =8.5, height = 3.5)
+**Supplemental Figure 10**
+
+filter(OTU  %in% c("90fd832464c5fbc417533484304f566f","3f64882f4221742c1cfa89d89cfe7975","d536522dff81586b788ee4acdbadb881" ) )
+
+
+CTD
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD") %>% filter(bact_ASV %in% c("3f64882f4221742c1cfa89d89cfe7975"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+FT
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT") %>% filter(bact_ASV %in% c("3f64882f4221742c1cfa89d89cfe7975"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+
+CTD
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD") %>% filter(bact_ASV %in% c("90fd832464c5fbc417533484304f566f"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+FT
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT") %>% filter(bact_ASV %in% c("90fd832464c5fbc417533484304f566f"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+
+CTD
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD") %>% filter(bact_ASV %in% c("d536522dff81586b788ee4acdbadb881"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+FT
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT") %>% filter(bact_ASV %in% c("d536522dff81586b788ee4acdbadb881"))
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+
+
+
+sum_up 
+
+```{r}
+col4corr_oceano <- melted_Colony4Corr %>% filter(Order == " o__Oceanospirillales")
+
+oceanoASVs <- unique(col4corr_oceano$OTU)
+
+
+oceano_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% oceanoASVs) %>% group_by(Name) %>% summarize(total_abund = sum(Abundance))
+#pivot wider
+#wider_oceano<- oceano_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(oceano_Ant4corrr) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+Oceanospirillales<- longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, fill = source, shape = source)) + geom_point(size = 3)  + scale_shape_manual(values = c(21, 24)) +theme_test() + ggtitle("Oceanospirillales") + geom_smooth(method = "lm", se = FALSE, aes(color = source)) + scale_fill_manual(values = c("lightgrey", "black" )) + scale_color_manual(values = c("darkgrey", "black" ))
+
+Oceanospirillales
+```
+
+CTD
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD")
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+FT
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT")
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+
+
+```{r}
+Paraglaciecola + Colwellia + Oceanospirillales + plot_layout(guides = "collect")
+```
+
+ggsave("phaeo_bact_correlations.pdf", width =8.5, height = 3.5)
+
+**Figure 3C**
+
+
+### Sphingomonadales
+```{r}
+
+col4corr_sphing <- melted_Colony4Corr %>% filter(Order == " o__Sphingomonadales")
+
+sphingASVs <- unique(col4corr_sphing$OTU)
+
+
+sphing_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% sphingASVs)
+#pivot wider
+wider_sphing<- sphing_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_sphing) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, color = source)) + geom_point() +facet_wrap(~bact_ASV)
+```
+The colony-associated Sphingomonas ASVs are not detected in seawater samples... 
+
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") &  Name != "A30" & Year !=2023)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA_glomO<- tax_glom(ps_colony_RA, 'Order')
+
+
+
+mergemelt<- psmelt(ps_colony_RA_glomO) 
+mergemelt$Order<-str_sub(mergemelt$Order, 5, str_length(mergemelt$Order))
+
+mergemelt <- mergemelt %>% filter(Order == "Sphingobacteriales")
+
+sphingo_sums <- mergemelt %>% group_by(Sample, Name, Station) %>% summarize(total = sum(Abundance))  %>% filter(total > 0 )
+
+sphingo_sums
+max(sphingo_sums$total)
+```
+
+Sphingomonas as a group is not detected or extremely low abundance in all environmental samples...
+
+### Cellvibrionales (SAR92)
+
+```{r}
+
+col4corr_oceano <- melted_Colony4Corr %>% filter(Order == " o__Cellvibrionales")
+
+oceanoASVs <- unique(col4corr_oceano$OTU)
+
+
+oceano_Ant4corrr <- melted_Ant4corrr %>% filter(OTU %in% oceanoASVs)
+#pivot wider
+wider_oceano<- oceano_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_oceano) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE) %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, color = source)) + geom_point() +facet_wrap(~bact_ASV)
+```
+bc13a8f6afa703399c40d5879cc68221
+
+```{r}
+oceano_Ant4corrr <- melted_Ant4corrr %>% filter(OTU == "bc13a8f6afa703399c40d5879cc68221")
+#pivot wider
+wider_oceano<- oceano_Ant4corrr%>% select(Name, OTU, Abundance) %>% pivot_wider( names_from = c("OTU"), values_from = c("Abundance"))
+
+#join with Phaeo abundance
+longer<-wider_a4long_locs %>% select(Name, " Prymnesiophyceae") %>% left_join(wider_oceano) %>% pivot_longer(!c(Name, " Prymnesiophyceae"), names_to = "bact_ASV", values_to = "rel_abund")
+
+names(longer)[2] <- "Prymnesiophyceae"
+
+
+cv<- longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>%  ggplot(aes(x=Prymnesiophyceae, y=rel_abund, fill = source)) + geom_point(size = 3, shape = 21)  + theme_test() + ggtitle("SAR92") + geom_smooth(method = "lm", se = FALSE, aes(color = source)) + scale_fill_manual(values = c("#00A4CC", "#F95700" )) + scale_color_manual(values = c("#00A4CC", "#F95700" ))
+
+cv
+```
+
+```{r}
+min(longer$rel_abund)
+max(longer$rel_abund)
+mean(longer$rel_abund)
+```
+
+
+CTD
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "CTD")
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+FT
+```{r}
+data = longer %>% separate(Name, sep = "-", into = c("source", "num"), remove = FALSE)  %>% filter(source == "FT")
+
+summary(lm(formula = rel_abund ~ Prymnesiophyceae, data = data ))
+```
+Visualize Overall abundance of Cellvibrionales in environmental samples:
+
+```{r}
+PSColony<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") &  Name != "A30" & Year !=2023)
+
+ps_colony_RA<- transform_sample_counts(PSColony, function(OTU) 100* OTU/sum(OTU))
+
+ps_colony_RA_glomO<- tax_glom(ps_colony_RA, 'Order')
+
+ps_colony_RA_glomO_F = filter_taxa(ps_colony_RA_glomO , function(x) sum(x) > 1, TRUE)
+
+mergemelt<- psmelt(ps_colony_RA_glomO_F) 
+mergemelt$Order<-str_sub(mergemelt$Order, 5, str_length(mergemelt$Order))
+mergemelt$Order[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+spatial_plot <- ggplot(data=mergemelt, aes(x=Sample, y=Abundance, fill=Order)) 
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( rep(colors30, 2))) + guides(fill=guide_legend(nrow=5)) + theme(legend.title =element_blank())
+```
+
+Visualize overall abundance of SAR92 in environmental samples:
+
+```{r}
+PSenviro<- subset_samples(ps_nochloro, Dataset %in% c("Antarctica") &  Name != "A30" & Year !=2023)
+
+ps_enviro_RA<- transform_sample_counts(PSenviro, function(OTU) 100* OTU/sum(OTU))
+
+ps_enviro_oceano <- subset_taxa(ps_enviro_RA, Order == " o__Cellvibrionales")
+
+ps_enviro_RA_glomG<- tax_glom(ps_enviro_oceano , 'Genus')
+
+ps_enviro_RA_glomG = filter_taxa(ps_enviro_RA_glomG , function(x) sum(x) > 0.1, TRUE)
+
+cv_mergemelt<- psmelt(ps_enviro_RA_glomG) 
+cv_mergemelt$Order<-str_sub(cv_mergemelt$Order, 5, str_length(cv_mergemelt$Order))
+#mergemelt$Order[mergemelt$Abundance < 1] <- "z< 1% abund."
+
+spatial_plot <- ggplot(data=cv_mergemelt, aes(x=Name, y=Abundance, fill=Genus)) 
+
+spatial_plot + geom_bar(aes(), stat="identity", position="stack") + 
+  theme_classic() + theme(legend.position="bottom") + scale_fill_manual(values =c( rep(colors30, 2))) + guides(fill=guide_legend(nrow=5)) + theme(legend.title =element_blank())
+```
+Almost all Cellvibrionales seqs in environmental samples are SAR92
+
+
+
+# Session Info:
+```{r}
+sessionInfo()
+```
+
+

@@ -1,0 +1,20 @@
+RNA_SampleID,Filter_SampleID,SampleType,FIlterSize,Filter_Fraction,Filter_number,ExtractionDate,Qubit,Dil_factor,BioA_RawConc,BioA_total_conc,RIN,BioA_link
+1,10C,FT,3,C,10,2/20/23,140,28,8.197,229.516,4.1,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+2,21B,FT,3,B,21,2/20/23,156,32,6.072,194.304,2.8,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+3,11C,FT,3,C,11,2/20/23,200,40,9.823,392.92,5,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+4,7C,FT,3,C,7,2/20/23,210,42,6.485,272.37,5.5,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+5,8C,FT,3,C,8,2/20/23,196,40,7.035,281.4,6.2,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+6,9B,FT,3,B,9,2/20/23,134,27,6.655,179.685,4.5,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+7,12C,FT,3,C,12,2/20/23,140,28,6.292,176.176,5.7,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+8,13C,FT,3,C,13,2/20/23,146,30,6.391,191.73,4.7,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+9,19B,FT,3,B,19,2/20/23,120,24,4.655,111.72,5.9,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+10,18C,FT,3,C,18,2/20/23,134,26,6.251,162.526,5.7,https://drive.google.com/file/d/1HYIVZmHGCCBPsDr4cTw0MOCoMbDq2SyB/view?usp=share_link
+11,22B,FT,3,B,22,2/20/23,146,30,10.569,317.07,2.6,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+12,20B,FT,3,B,20,2/20/23,102,20,7.417,148.34,3.2,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+13,45,CTD,0.2,na,45,2/20/23,210,42,5.005,210.21,5.2,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+14,29,CTD,0.2,na,29,2/20/23,96.2,20,5.61,112.2,5.5,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+15,22,CTD,0.2,na,22,2/20/23,118,24,4.309,103.416,4,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+16,50,CTD,0.2,na,50,2/20/23,152,30,5.276,158.28,3.7,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+17,26,CTD,0.2,na,26,2/20/23,114,23,4.944,113.712,4.2,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+18,400 CULTURE 1,culture,0.2,na,,2/20/23,136,27,4.287,115.749,5.6,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
+19,400 CULTURE 2,culture,0.2,na,,2/20/23,132,26,5.125,133.25,5.5,https://drive.google.com/file/d/14ZMZuXRc0fCCyNvCVFbfOxx7Ho45Q8LI/view?usp=share_link
